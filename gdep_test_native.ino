@@ -117,6 +117,145 @@ void renderFrame()
   while (display.nextPage());
 }
 
+
+/**************************************************************/
+
+void patternBarsHorizontal()
+{
+  Serial.println("Pattern: 7-color horizontal bars");
+
+  const uint16_t colors[7] = {
+    GxEPD_BLACK, GxEPD_WHITE, GxEPD_GREEN, GxEPD_BLUE,
+    GxEPD_RED,   GxEPD_YELLOW, GxEPD_ORANGE
+  };
+  const char* names[7] = {"BLACK","WHITE","GREEN","BLUE","RED","YELLOW","ORANGE"};
+
+  display.setFullWindow();
+  display.firstPage();
+  do
+  {
+    const int16_t W = display.width();
+    const int16_t H = display.height();
+    const int16_t barH = H / 7;
+
+    for (int i = 0; i < 7; i++)
+    {
+      int16_t y = i * barH;
+      int16_t h = (i == 6) ? (H - y) : barH;
+      display.fillRect(0, y, W, h, colors[i]);
+
+      // Etichetta (bianco su colori scuri)
+      display.setTextSize(2);
+      display.setFont(nullptr);
+      uint16_t tc = (colors[i] == GxEPD_BLACK || colors[i] == GxEPD_BLUE || colors[i] == GxEPD_RED)
+                      ? GxEPD_WHITE : GxEPD_BLACK;
+      display.setTextColor(tc);
+      display.setCursor(10, y + 26);
+      display.print(names[i]);
+    }
+  }
+  while (display.nextPage());
+}
+
+/**************************************************************/
+
+
+void patternCheckerboard(int cell = 20)
+{
+  Serial.printf("Pattern: checkerboard (cell=%d)\n", cell);
+
+  display.setFullWindow();
+  display.firstPage();
+  do
+  {
+    const int16_t W = display.width();
+    const int16_t H = display.height();
+
+    // Alterna BLACK e WHITE
+    for (int y = 0; y < H; y += cell)
+    {
+      for (int x = 0; x < W; x += cell)
+      {
+        bool odd = ((x / cell) + (y / cell)) & 1;
+        display.fillRect(x, y,
+                         min(cell, W - x),
+                         min(cell, H - y),
+                         odd ? GxEPD_BLACK : GxEPD_WHITE);
+      }
+    }
+
+    // Cornice rossa (debug bordi)
+    display.drawRect(0, 0, W, H, GxEPD_RED);
+  }
+  while (display.nextPage());
+}
+
+
+/**************************************************************/
+
+uint16_t rampColor7(int zone)
+{
+  // 0..6
+  static const uint16_t c[7] = {
+    GxEPD_BLACK, GxEPD_BLUE, GxEPD_GREEN, GxEPD_RED,
+    GxEPD_ORANGE, GxEPD_YELLOW, GxEPD_WHITE
+  };
+  zone = max(0, min(6, zone));
+  return c[zone];
+}
+
+void patternQuantizedRamp()
+{
+  Serial.println("Pattern: quantized ramp (7 zones)");
+
+  display.setFullWindow();
+  display.firstPage();
+  do
+  {
+    const int16_t W = display.width();
+    const int16_t H = display.height();
+
+    // Sfondo bianco
+    display.fillScreen(GxEPD_WHITE);
+
+    // Rampa: 7 zone verticali
+    int16_t zoneW = W / 7;
+
+    for (int i = 0; i < 7; i++)
+    {
+      int16_t x0 = i * zoneW;
+      int16_t w  = (i == 6) ? (W - x0) : zoneW;
+      uint16_t col = rampColor7(i);
+
+      // Dentro la zona, disegno strisce sottili alternate col bianco per evidenziare “bleeding”
+      for (int x = x0; x < x0 + w; x++)
+      {
+        uint16_t c = ((x - x0) % 6 < 3) ? col : GxEPD_WHITE;
+        display.drawFastVLine(x, 0, H, c);
+      }
+
+      // Etichetta
+      display.setTextSize(2);
+      display.setFont(nullptr);
+      uint16_t tc = (col == GxEPD_BLACK || col == GxEPD_BLUE || col == GxEPD_RED) ? GxEPD_WHITE : GxEPD_BLACK;
+      display.setTextColor(tc);
+      display.setCursor(x0 + 6, 30);
+      display.printf("Z%d", i);
+    }
+
+    // Linea di riferimento nera al centro
+    display.drawFastHLine(0, H/2, W, GxEPD_BLACK);
+  }
+  while (display.nextPage());
+}
+
+
+/**************************************************************/
+
+
+
+/**************************************************************/
+
 void setup()
 {
   Serial.begin(115200);
@@ -145,23 +284,16 @@ void setup()
   //renderFrame();
 }
 
+
 void loop()
 {
- for (const ColorLine& c : kLines)
-  {
-    display.setFullWindow();
-    display.firstPage();
-    do
-    {
-      display.fillScreen(c.color);
+  patternBarsHorizontal();
+  delay(60000);
 
-      Serial.print("Color: ");
-      Serial.println(c.text);
-    }
-    while (display.nextPage());
+  patternCheckerboard(20);
+  delay(60000);
 
-
-    delay(20000);
-  }
+  patternQuantizedRamp();
+  delay(60000);
   //renderFrame();
 }

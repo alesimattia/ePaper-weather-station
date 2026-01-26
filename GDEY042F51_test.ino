@@ -12,7 +12,7 @@
 #include <GxEPD2_4C.h>
 #include "epd4c/GxEPD2_420c_GDEY0420F51.h"
 
-// Font SANS
+// Font SANS (Adafruit GFX)
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
 
@@ -61,77 +61,18 @@ static const int WX_H = 48;
 static const int SM_W = 16;
 static const int SM_H = 16;
 
-// ------------------------------
-// Moon overlay (per indicare "notte" senza icone night dedicate)
-// ------------------------------
-static const int MOON_W = 12;
-static const int MOON_H = 12;
-static uint8_t moonBits[(MOON_W * MOON_H + 7) / 8];
-
-static inline void setBitLSB(uint8_t* buf, int w, int x, int y, bool on)
-{
-  int idx = y * w + x;
-  int byteIdx = idx >> 3;
-  int bitIdx = idx & 7; // LSB first
-  if (on) buf[byteIdx] |= (1 << bitIdx);
-  else    buf[byteIdx] &= ~(1 << bitIdx);
-}
-
-static void buildMoonCrescent()
-{
-  memset(moonBits, 0, sizeof(moonBits));
-  // due cerchi: uno pieno meno uno spostato => falce
-  float cx = (MOON_W - 1) / 2.0f;
-  float cy = (MOON_H - 1) / 2.0f;
-  float r  = 5.2f;
-  float ox = cx + 2.0f; // offset per "mordere" la luna
-
-  for (int y = 0; y < MOON_H; y++) {
-    for (int x = 0; x < MOON_W; x++) {
-      float dx = x - cx, dy = y - cy;
-      float d1 = dx*dx + dy*dy;
-
-      float dx2 = x - ox, dy2 = y - cy;
-      float d2 = dx2*dx2 + dy2*dy2;
-
-      bool inOuter = (d1 <= r*r);
-      bool cutOut  = (d2 <= (r*r)*0.85f);
-
-      bool on = inOuter && !cutOut;
-      setBitLSB(moonBits, MOON_W, x, y, on);
-    }
-  }
-}
-
+// ---------- Icon wrapper ----------
 struct IconXBM {
   const uint8_t* bits;
   uint16_t w;
   uint16_t h;
 };
 
-static IconXBM pickWeatherIcon(const char* mainStr)
-{
-  // weather.main: Clear, Clouds, Rain, Snow, Thunderstorm, Drizzle, Mist, Fog...
-  if (!mainStr) return { (const uint8_t*)img_cloudy, WX_W, WX_H };
-
-  if (strcmp(mainStr, "Clear") == 0)        return { (const uint8_t*)img_sunny,   WX_W, WX_H };
-  if (strcmp(mainStr, "Clouds") == 0)       return { (const uint8_t*)img_cloudy,  WX_W, WX_H };
-  if (strcmp(mainStr, "Rain") == 0)         return { (const uint8_t*)img_rain,    WX_W, WX_H };
-  if (strcmp(mainStr, "Drizzle") == 0)      return { (const uint8_t*)img_rain,    WX_W, WX_H };
-  if (strcmp(mainStr, "Snow") == 0)         return { (const uint8_t*)img_snow,    WX_W, WX_H };
-  if (strcmp(mainStr, "Thunderstorm") == 0) return { (const uint8_t*)img_thunder, WX_W, WX_H };
-  if (strcmp(mainStr, "Fog") == 0)          return { (const uint8_t*)img_fog,     WX_W, WX_H };
-  if (strcmp(mainStr, "Mist") == 0)         return { (const uint8_t*)img_fog,     WX_W, WX_H };
-  if (strcmp(mainStr, "Haze") == 0)         return { (const uint8_t*)img_fog,     WX_W, WX_H };
-
-  return { (const uint8_t*)img_cloudy, WX_W, WX_H };
-}
-
 // ---------- Time helpers ----------
 static uint32_t nowEpoch()
 {
   time_t now = time(nullptr);
-  if (now < 1700000000) return 0;
+  if (now < 1700000000) return 0; // tempo non valido / non sincronizzato
   return (uint32_t)now;
 }
 
@@ -159,6 +100,49 @@ static bool isNightAt(uint32_t epoch)
   if (!epoch || !rtc_sunrise_epoch || !rtc_sunset_epoch) return false;
   // Notte: dopo tramonto oppure prima alba
   return (epoch >= rtc_sunset_epoch) || (epoch < rtc_sunrise_epoch);
+}
+
+// ---------- Weather icon selection (DAY/NIGHT) ----------
+static IconXBM getWeatherIcon(const char* mainStr, uint32_t whenEpoch)
+{
+  bool night = isNightAt(whenEpoch);
+
+  if (!mainStr) {
+    return { night ? (const uint8_t*)img_cloudy_night : (const uint8_t*)img_cloudy, WX_W, WX_H };
+  }
+
+  // Clear
+  if (strcmp(mainStr, "Clear") == 0) {
+    return { night ? (const uint8_t*)img_sunny_night : (const uint8_t*)img_sunny, WX_W, WX_H };
+  }
+
+  // Clouds
+  if (strcmp(mainStr, "Clouds") == 0) {
+    return { night ? (const uint8_t*)img_cloudy_night : (const uint8_t*)img_cloudy, WX_W, WX_H };
+  }
+
+  // Rain / Drizzle
+  if (strcmp(mainStr, "Rain") == 0 || strcmp(mainStr, "Drizzle") == 0) {
+    return { night ? (const uint8_t*)img_rain_night : (const uint8_t*)img_rain, WX_W, WX_H };
+  }
+
+  // Snow
+  if (strcmp(mainStr, "Snow") == 0) {
+    return { (const uint8_t*)img_snow, WX_W, WX_H };
+  }
+
+  // Thunderstorm
+  if (strcmp(mainStr, "Thunderstorm") == 0) {
+    return { (const uint8_t*)img_thunder, WX_W, WX_H };
+  }
+
+  // Fog/Mist/Haze
+  if (strcmp(mainStr, "Fog") == 0 || strcmp(mainStr, "Mist") == 0 || strcmp(mainStr, "Haze") == 0) {
+    return { (const uint8_t*)img_fog, WX_W, WX_H };
+  }
+
+  // default
+  return { night ? (const uint8_t*)img_cloudy_night : (const uint8_t*)img_cloudy, WX_W, WX_H };
 }
 
 // ---------- WiFi ----------
@@ -405,18 +389,17 @@ static void drawRightOverlay(float tC, float rh, float p_hPa)
   const int x = 300, y = 0, w = 100, h = 200;
   display.fillRect(x, y, w, h, GxEPD_BLACK);
 
-  // Orario attuale grande (ma più piccolo di prima, così entra)
+  // Orario attuale (font più piccolo così entra)
   char hhmm[8]; fmtHHMM(nowEpoch(), hhmm, sizeof(hhmm));
   display.setTextColor(GxEPD_WHITE);
   display.setFont(&FreeSansBold12pt7b);
-  display.setCursor(x + 6, y + 28);
+  display.setCursor(x + 8, y + 22);
   display.print(hhmm);
 
-  // Righe BME (bianco) + icone temp/umidità (rosse)
   display.setFont(&FreeSans9pt7b);
   display.setTextColor(GxEPD_WHITE);
 
-  int cy = y + 52;
+  int cy = y + 48;
 
   // TEMP: icona rossa + testo bianco
   display.drawXBitmap(x + 6, cy - 12, (const uint8_t*)img_temperature, SM_W, SM_H, GxEPD_RED);
@@ -436,7 +419,7 @@ static void drawRightOverlay(float tC, float rh, float p_hPa)
   cy += 16;
 
   // Spazio extra prima di alba/tramonto
-  cy += 6;
+  cy += 8;
 
   // Alba / Tramonto con icone gialle
   char sr[8], ss[8];
@@ -456,7 +439,7 @@ static void drawRightOverlay(float tC, float rh, float p_hPa)
   cy += 16;
 
   // Spazio extra prima di "Next:"
-  cy += 6;
+  cy += 8;
 
   // Next: tempo rimanente (minuti) per weather e img
   uint32_t rw = remainingSec(rtc_last_weather_epoch, WEATHER_INTERVAL_MIN);
@@ -478,7 +461,7 @@ static void drawBottomWeatherBar()
   const int y = 200;
   display.fillRect(0, y, 400, 100, GxEPD_BLACK);
 
-  // separatori verticali (come richiesto: prima a sinistra = current, poi divider)
+  // separatori verticali: current | next1 | next2 | next3
   for (int sx : {100, 200, 300}) {
     display.drawLine(sx, y + 6, sx, y + 94, GxEPD_WHITE);
   }
@@ -487,17 +470,13 @@ static void drawBottomWeatherBar()
   {
     if (!rtc_weather[idx].valid) return;
 
-    IconXBM ic = pickWeatherIcon(rtc_weather[idx].mainStr);
+    // Se quandoEpoch (slot0 = download time, slot future = dt forecast) è dopo tramonto -> night icon
+    IconXBM ic = getWeatherIcon(rtc_weather[idx].mainStr, rtc_weather[idx].dt_epoch);
 
     // icona centrata nel blocco (giallo)
     int ix = x0 + (w - (int)ic.w) / 2;
     int iy = y + 8;
     display.drawXBitmap(ix, iy, ic.bits, ic.w, ic.h, GxEPD_YELLOW);
-
-    // Se notte per quell'orario: disegna luna sopra l'icona (icona "notturna")
-    if (isNightAt(rtc_weather[idx].dt_epoch)) {
-      display.drawXBitmap(ix + 2, iy + 2, moonBits, MOON_W, MOON_H, GxEPD_WHITE);
-    }
 
     // Temperatura (rossa)
     display.setFont(&FreeSansBold12pt7b);
@@ -555,8 +534,6 @@ void setup()
 {
   Serial.begin(115200);
   delay(100);
-
-  buildMoonCrescent();
 
   SPI.begin(EPD_SCK, EPD_MISO, EPD_MOSI, EPD_CS);
 
@@ -617,6 +594,8 @@ void setup()
       // IMG: aggiorna se scaduta o assente
       if (imgDue) {
         Serial.println("Downloading XBM text and caching...");
+        // Se non riesce a scaricare l'immagine dall'endpoint mostra l'immagine di image.h.
+        // NON sovrascrivere la cache se fallisce.
         if (downloadXbmTextAndCache(IMG_URL, IMG_CACHE_PATH)) {
           rtc_last_img_epoch = nowEpoch(); // timestamp download immagine
         } else {
@@ -649,8 +628,7 @@ void setup()
 
     } else {
       Serial.println("WiFi connect failed (15s). WiFi OFF until next wake.");
-      // “al posto di ciò che avrebbe dovuto scaricare da internet”
-      // se in questo giro era previsto un update immagine -> fallback
+      // Se in questo giro era previsto un update immagine -> fallback
       if (imgDue) forceFallbackImageThisBoot = true;
     }
 
